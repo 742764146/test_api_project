@@ -39,7 +39,7 @@ jobs:
 
       - name: 打包 Windows
         if: runner.os == 'Windows'
-        run: cmd /c build.bat
+        run: pwsh -File build.ps1
 
       - name: 上传产物
         uses: actions/upload-artifact@v5
