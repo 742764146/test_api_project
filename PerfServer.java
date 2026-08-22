@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.net.http.HttpClient;
@@ -63,6 +64,8 @@ public class PerfServer {
         server.createContext("/", PerfServer::handleStatic);
         server.createContext("/api/version", PerfServer::handleVersion);
         server.createContext("/api/interfaces", PerfServer::handleInterfaceHistory);
+        server.createContext("/api/interfaces/clear", PerfServer::handleInterfaceClear);
+        server.createContext("/api/netcheck", PerfServer::handleNetcheck);
         server.createContext("/api/smoke", PerfServer::handleSmoke);
         server.createContext("/api/smoke/export", PerfServer::handleSmokeExport);
         server.createContext("/api/monitor/start", PerfServer::handleMonitorStart);
@@ -100,6 +103,53 @@ public class PerfServer {
     static void handleVersion(HttpExchange ex) throws IOException {
         respond(ex, 200, "application/json; charset=utf-8",
                 "{\"version\":\"" + VERSION + "\",\"developer\":\"" + DEVELOPER + "\"}");
+    }
+
+    /** 网络连通性探测:对目标接口做 TCP 连接,任一可达即视为有网络 */
+    static void handleNetcheck(HttpExchange ex) throws IOException {
+        List<TargetSpec> specs;
+        try {
+            specs = parseTargets(form(ex));
+        } catch (IllegalArgumentException e) {
+            respond(ex, 200, "application/json; charset=utf-8", "{\"online\":true,\"total\":0}");
+            return;
+        }
+        if (specs.isEmpty()) {
+            respond(ex, 200, "application/json; charset=utf-8", "{\"online\":true,\"total\":0}");
+            return;
+        }
+        List<String> fail = new ArrayList<>();
+        for (TargetSpec s : specs) {
+            boolean ok = false;
+            try {
+                URI u = s.fullUri();
+                int port = u.getPort() > 0 ? u.getPort()
+                        : ("https".equals(u.getScheme()) || "wss".equals(u.getScheme()) ? 443 : 80);
+                ok = probe(u.getHost(), port, 2000);
+            } catch (Exception ignored) { }
+            if (ok) {
+                respond(ex, 200, "application/json; charset=utf-8", "{\"online\":true,\"total\":" + specs.size() + "}");
+                return;
+            }
+            fail.add(s.url);
+        }
+        StringBuilder fb = new StringBuilder("[");
+        for (int i = 0; i < fail.size(); i++) {
+            if (i > 0) fb.append(",");
+            fb.append(json(fail.get(i)));
+        }
+        fb.append("]");
+        respond(ex, 200, "application/json; charset=utf-8",
+                "{\"online\":false,\"total\":" + specs.size() + ",\"fail\":" + fb + "}");
+    }
+
+    static boolean probe(String host, int port, int timeoutMs) {
+        try (Socket s = new Socket()) {
+            s.connect(new InetSocketAddress(host, port), timeoutMs);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** 用户数据目录(打包后仍可写,升级不丢失) */
@@ -310,14 +360,14 @@ public class PerfServer {
             boolean first = true;
             for (String[] e : q) {
                 if (!first) sb.append(",");
-                sb.append("{").append(json("time", e[0])).append(",")
-                  .append(json("method", e[1])).append(",")
-                  .append(json("url", e[2])).append(",")
-                  .append(json("status", e[3])).append(",")
-                  .append(json("ms", e[4])).append(",")
-                  .append(json("reqHeaders", e[5])).append(",")
-                  .append(json("reqBody", e[6])).append(",")
-                  .append(json("respBody", truncate(e[7], 2000))).append("}");
+                sb.append("{").append(PerfServer.json("time", e[0])).append(",")
+                  .append(PerfServer.json("method", e[1])).append(",")
+                  .append(PerfServer.json("url", e[2])).append(",")
+                  .append(PerfServer.json("status", e[3])).append(",")
+                  .append(PerfServer.json("ms", e[4])).append(",")
+                  .append(PerfServer.json("reqHeaders", e[5])).append(",")
+                  .append(PerfServer.json("reqBody", e[6])).append(",")
+                  .append(PerfServer.json("respBody", truncate(e[7], 2000))).append("}");
                 first = false;
             }
             return sb.append("]").toString();
@@ -409,8 +459,9 @@ public class PerfServer {
         }
         int count = clamp(intOr(p.get("count"), 5), 1, 20);
         String token = p.getOrDefault("token", "").trim();
+        String tokenName = p.getOrDefault("tokenName", "authorization");
         int rate = clamp(intOr(p.get("rate"), 0), 0, 100000);
-        String[] tokenHeader = headerFromToken(token);
+        String[] tokenHeader = headerFromToken(token, tokenName);
 
         List<SmokeResult> results = new ArrayList<>();
         for (TargetSpec s : specs) {
@@ -539,8 +590,8 @@ public class PerfServer {
         final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
         final List<String[]> slow = new CopyOnWriteArrayList<>(); // {时间, url, 耗时, 状态}
 
-        Monitor(List<TargetSpec> specs, String token, int[] net, int durationSec, int intervalSec, int thresholdMs) {
-            this.authHeader = headerFromToken(token);
+        Monitor(List<TargetSpec> specs, String token, String tokenName, int[] net, int durationSec, int intervalSec, int thresholdMs) {
+            this.authHeader = headerFromToken(token, tokenName);
             List<MonTarget> list = new ArrayList<>(specs.size());
             for (TargetSpec s : specs) list.add(new MonTarget(s, s.ws() ? null : buildRequest(s, authHeader, 0)));
             this.targets = list;
@@ -656,10 +707,11 @@ public class PerfServer {
         int interval = clamp(Integer.parseInt(p.getOrDefault("interval", "2")), 1, 60);
         int threshold = clamp(Integer.parseInt(p.getOrDefault("threshold", "500")), 1, 600000);
         String token = p.getOrDefault("token", "");
-        String herr = validateHeader(token);
+        String tokenName = p.getOrDefault("tokenName", "authorization");
+        String herr = validateHeader(token, tokenName);
         if (herr != null) { respond(ex, 400, "text/plain; charset=utf-8", herr); return; }
         int[] net = netOf(p);
-        monitor = new Monitor(specs, token, net, duration, interval, threshold);
+        monitor = new Monitor(specs, token, tokenName, net, duration, interval, threshold);
         rememberInterfaces(specs);
         monitor.start();
         respond(ex, 200, "application/json; charset=utf-8",
@@ -766,6 +818,7 @@ public class PerfServer {
         volatile boolean finished = false;
         final List<LoadTarget> targets;
         final String tokenRaw; // 用于历史记录复用
+        final String tokenNameRaw; // Token 头名,用于历史记录复用
         final String[] authHeader; // {name, value} 或 null
         final int[] net; // 弱网配置
         final List<long[]> stages; // {durationSec, concurrency}
@@ -781,9 +834,10 @@ public class PerfServer {
         long gCachedAt = 0;
         String gCachedPercentiles = "{}";
 
-        LoadTest(List<TargetSpec> specs, String token, int[] net, List<long[]> stages) {
+        LoadTest(List<TargetSpec> specs, String token, String tokenName, int[] net, List<long[]> stages) {
             this.tokenRaw = token;
-            this.authHeader = headerFromToken(token);
+            this.tokenNameRaw = tokenName;
+            this.authHeader = headerFromToken(token, tokenName);
             this.net = net;
             this.stages = stages;
             long upBps = netActive(net) ? net[3] : 0;
@@ -997,10 +1051,11 @@ public class PerfServer {
         }
         if (stages.isEmpty()) { respond(ex, 400, "text/plain; charset=utf-8", "阶段配置无效"); return; }
         String token = p.getOrDefault("token", "");
-        String herr = validateHeader(token);
+        String tokenName = p.getOrDefault("tokenName", "authorization");
+        String herr = validateHeader(token, tokenName);
         if (herr != null) { respond(ex, 400, "text/plain; charset=utf-8", herr); return; }
         int[] net = netOf(p);
-        loadTest = new LoadTest(specs, token, net, stages);
+        loadTest = new LoadTest(specs, token, tokenName, net, stages);
         rememberInterfaces(specs);
         loadTest.start();
         respond(ex, 200, "application/json; charset=utf-8",
@@ -1342,7 +1397,7 @@ public class PerfServer {
                     sb.append("{").append(json("seq", row.seq)).append(",").append(json("dns", row.dns))
                       .append(",").append(json("connect", row.connect)).append(",").append(json("tls", row.tls))
                       .append(",").append(json("firstByte", row.firstByte)).append(",").append(json("total", row.total))
-                      .append(",").append(json("code", row.code)).append("}");
+                      .append(",").append(json("code", row.code)).append(",").append(json("respBody", truncate(row.respBody, 2000))).append("}");
                 }
             }
             sb.append("]}");
@@ -1355,15 +1410,16 @@ public class PerfServer {
         StringBuilder sb = new StringBuilder("﻿");
         sb.append("冒烟测试结果导出,,,,,,,,\r\n");
         sb.append("导出时间,").append(csv(nowStr())).append("\r\n\r\n");
-        sb.append("接口,方法,序号,DNS(ms),TCP连接(ms),TLS(ms),首字节(ms),总耗时(ms),状态码/错误\r\n");
+        sb.append("接口,方法,序号,DNS(ms),TCP连接(ms),TLS(ms),首字节(ms),总耗时(ms),状态码/错误,响应体\r\n");
         for (SmokeResult sr : lastSmoke) {
             for (SmokeRow row : sr.rows) {
                 sb.append(csv(sr.url)).append(",").append(sr.method).append(",").append(row.seq).append(",");
                 if (row.error != null) {
-                    sb.append(",,,,,,").append(csv(row.error)).append("\r\n");
+                    sb.append(",,,,,,").append(csv(row.error)).append(",\r\n");
                 } else {
                     sb.append(row.dns).append(",").append(row.connect).append(",").append(row.tls).append(",")
-                      .append(row.firstByte).append(",").append(row.total).append(",").append(row.code).append("\r\n");
+                      .append(row.firstByte).append(",").append(row.total).append(",").append(row.code).append(",")
+                      .append(csv(truncate(row.respBody, 2000))).append("\r\n");
                 }
             }
         }
@@ -1436,6 +1492,15 @@ public class PerfServer {
         }
     }
 
+    static void handleInterfaceClear(HttpExchange ex) throws IOException {
+        synchronized (interfaceHistory) {
+            interfaceHistory.clear();
+            interfaceKeys.clear();
+        }
+        try { Files.deleteIfExists(interfacesFile()); } catch (Exception ignored) { }
+        respond(ex, 200, "application/json; charset=utf-8", "{\"ok\":true}");
+    }
+
     // ==================== 压测记录(自动保存到 ./history/) ====================
 
     static Path historyDir() {
@@ -1477,7 +1542,8 @@ public class PerfServer {
             }
             cfg.append("],\"net\":[").append(lt.net[0]).append(",").append(lt.net[1]).append(",")
                .append(lt.net[2] / 1024).append(",").append(lt.net[3] / 1024).append("]")
-               .append(",").append(json("token", lt.tokenRaw)).append("}");
+               .append(",").append(json("token", lt.tokenRaw))
+               .append(",").append(json("tokenName", lt.tokenNameRaw)).append("}");
 
             // 结果
             List<Long> all = lt.allLatencies();
@@ -1715,25 +1781,26 @@ public class PerfServer {
      *   "X-Token: abc123"   -> X-Token: abc123(带冒号则按完整 Header 处理)
      *   空                  -> null(不加头)
      */
-    static String[] headerFromToken(String token) {
+    static String[] headerFromToken(String token, String tokenName) {
         if (token == null || token.isBlank()) return null;
         token = token.trim();
         int i = token.indexOf(':');
         if (i > 0 && token.substring(0, i).matches("[A-Za-z0-9-]+")) {
             return new String[]{token.substring(0, i).trim(), token.substring(i + 1).trim()};
         }
-        return new String[]{"Authorization", "Bearer " + token};
+        String name = (tokenName == null || tokenName.isBlank()) ? "authorization" : tokenName.trim();
+        return new String[]{name, token};
     }
 
     /** 校验 token 能否作为合法 Header(如含中文会抛异常),返回错误信息或 null */
-    static String validateHeader(String token) {
-        String[] h = headerFromToken(token);
+    static String validateHeader(String token, String tokenName) {
+        String[] h = headerFromToken(token, tokenName);
         if (h == null) return null;
         try {
             HttpRequest.newBuilder(URI.create("http://localhost/")).header(h[0], h[1]).build();
             return null;
         } catch (IllegalArgumentException e) {
-            return "Token 无法作为请求头发送(不能包含中文/特殊字符): " + e.getMessage();
+            return "Token 名或 Token 值无法作为请求头发送(不能包含中文/特殊字符): " + e.getMessage();
         }
     }
 
