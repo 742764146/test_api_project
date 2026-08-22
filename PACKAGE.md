@@ -45,7 +45,7 @@ api-perf-test/
 ├── build.sh             # macOS 打包脚本
 ├── build.bat            # Windows 打包脚本
 ├── assets/              # 图标(app.ico / app.icns)
-├── javafx-sdk-21.0.4/   # JavaFX 运行时(构建依赖)
+├── javafx-sdk-21.0.12/   # JavaFX 运行时(构建依赖)
 ├── PACKAGE.md           # 本文档
 └── 压测-1.0.0.dmg        # 打包产物(macOS)
 ```
@@ -101,10 +101,10 @@ rm -rf icon.iconset
 
 ```bash
 VERSION="1.0.0"; APP_NAME="压测"; MAIN_CLASS="Launcher"
-JAVAFX_DIR="javafx-sdk-21.0.4"
+JAVAFX_DIR="javafx-sdk-21.0.12"
 
 # 下载 JavaFX(缺失时,arm64=aarch64 / x64)
-curl -L -s -o javafx-sdk.zip "https://download2.gluonhq.com/openjfx/21.0.4/openjfx-21.0.4_osx-aarch64_bin-sdk.zip"
+curl -L -s -o javafx-sdk.zip "https://download2.gluonhq.com/openjfx/21.0.12/openjfx-21.0.12_osx-aarch64_bin-sdk.zip"
 unzip -q -o javafx-sdk.zip && rm javafx-sdk.zip
 
 # 1) 编译(JavaFX 上类路径)
@@ -146,11 +146,11 @@ build.bat
 脚本内部逻辑（与 macOS 一致，区别在 JavaFX 为 `windows-x64`、动态库为 `.dll`、图标为 `.ico`）：
 
 ```bat
-javac -encoding UTF-8 -cp "javafx-sdk-21.0.4\lib\*" -d build\classes PerfServer.java Launcher.java AppWindow.java
+javac -encoding UTF-8 -cp "javafx-sdk-21.0.12\lib\*" -d build\classes PerfServer.java Launcher.java AppWindow.java
 copy index.html build\classes\index.html
 jar cfe dist\perf-test.jar Launcher -C build\classes .
-copy javafx-sdk-21.0.4\lib\*.jar dist\
-copy javafx-sdk-21.0.4\lib\*.dll dist\
+copy javafx-sdk-21.0.12\lib\*.jar dist\
+copy javafx-sdk-21.0.12\lib\*.dll dist\
 
 jpackage --type exe --name 压测 --app-version 1.0.0 ^
   --input dist --main-jar perf-test.jar --main-class Launcher ^

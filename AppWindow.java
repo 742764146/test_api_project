@@ -18,6 +18,12 @@ public class AppWindow extends Application {
         WebView view = new WebView();
         WebEngine engine = view.getEngine();
 
+        // WebView 默认吞掉 JS 的 alert(),这里转成页面内的 toast 提示(不依赖原生对话框)
+        engine.setOnAlert(e -> {
+            String js = "if(window.toast){toast(" + jsStr(e.getData()) + ",true);}";
+            engine.executeScript(js);
+        });
+
         StackPane root = new StackPane(view);
         Scene scene = new Scene(root, 1000, 900);
 
@@ -33,6 +39,26 @@ public class AppWindow extends Application {
             waitForServer(PORT);
             Platform.runLater(() -> engine.load(url));
         }).start();
+    }
+
+    /** 把 Java 字符串转成 JS 双引号字符串字面量(用于 executeScript 拼接) */
+    private static String jsStr(String s) {
+        if (s == null) return "\"\"";
+        StringBuilder sb = new StringBuilder("\"");
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '\\': sb.append("\\\\"); break;
+                case '"': sb.append("\\\""); break;
+                case '\n': sb.append("\\n"); break;
+                case '\r': sb.append("\\r"); break;
+                case '\t': sb.append("\\t"); break;
+                default:
+                    if (c < 0x20 || c == 0x2028 || c == 0x2029) sb.append(String.format("\\u%04x", (int) c));
+                    else sb.append(c);
+            }
+        }
+        return sb.append('"').toString();
     }
 
     static void waitForServer(int port) {

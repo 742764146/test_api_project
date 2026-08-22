@@ -105,7 +105,8 @@
   pre.errors { background: #2d3748; color: #febcb8; padding: 10px; border-radius: 6px; font-size: 12px; max-height: 120px; overflow: auto; }
   .op { padding: 4px 10px; font-size: 12px; margin-right: 4px; }
   /* 请求/响应明细 */
-  .req-item { border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 6px; padding: 6px 10px; background: #fbfcfe; }
+  .req-item { border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 6px; padding: 6px 10px; background: #fbfcfe;
+              content-visibility: auto; contain-intrinsic-size: auto 60px; } /* 跳过屏外明细的布局/绘制,减轻 WebView 滑动卡顿 */
   .req-item summary { cursor: pointer; font-size: 12px; color: #2c3e50; }
   .req-item .time { color: #90a0b0; margin-right: 6px; }
   .req-block { margin: 6px 0; }
@@ -131,16 +132,33 @@
       <div id="smoke-rows"></div>
     </div>
     <div class="row">
-      <button class="preset" onclick="addTargetRow('smoke', {}, ['http','https'])">+ 添加接口</button>
+      <button class="preset" onclick="addTargetRow('smoke')">+ 添加接口</button>
       <div class="field"><label>历史接口</label><div style="display:flex;gap:4px;align-items:center"><select id="smoke-hist" onchange="useHistory('smoke', this)"><option value="">选择历史接口...</option></select><button class="preset" id="smoke-hist-clear" style="padding:4px 8px;font-size:11px" onclick="clearInterfaceHistory()" disabled>清空</button></div></div>
       <div class="field"><label>每个接口请求次数</label><input id="smoke-count" type="number" value="5" min="1" max="20" style="width:90px"></div>
       <div class="field"><label>Token 开关</label><label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;height:33px"><input type="checkbox" id="smoke-token-on" checked> 启用</label></div>
       <div class="field"><label>Token 名(Header Key)</label><input id="smoke-tokenname" value="authorization" style="width:130px"></div>
       <div class="field"><label>Token(全局,可选)</label><input id="smoke-token" placeholder="Token 值 或 X-Token: xxx" style="width:200px"></div>
-      <div class="field"><label>限速KB/s(可选)</label><input id="smoke-rate" type="number" min="0" placeholder="0=不限" style="width:100px"></div>
       <button class="primary" id="smoke-run">运行</button>
       <button class="danger" id="smoke-clear">清除</button>
       <span class="status" id="smoke-status"></span>
+    </div>
+    <div class="row">
+      <div class="field"><label>弱网模拟(可选):延迟ms / 抖动ms / 下行KB/s / 上行KB/s,0=不限</label>
+        <div style="display:flex;gap:6px">
+          <input id="smoke-lat" type="number" min="0" value="0" style="width:80px">
+          <input id="smoke-jit" type="number" min="0" value="0" style="width:80px">
+          <input id="smoke-down" type="number" min="0" value="0" style="width:90px">
+          <input id="smoke-up" type="number" min="0" value="0" style="width:90px">
+        </div>
+      </div>
+      <div class="field"><label>网络预设</label>
+        <div style="display:flex;gap:6px">
+          <button class="preset active" data-t="smoke" data-v="0,0,0,0">正常</button>
+          <button class="preset" data-t="smoke" data-v="60,20,1500,400">4G</button>
+          <button class="preset" data-t="smoke" data-v="200,80,300,100">3G</button>
+          <button class="preset" data-t="smoke" data-v="400,150,50,30">弱3G</button>
+        </div>
+      </div>
     </div>
     <div class="row">
       <button class="preset" id="smoke-export-csv" onclick="exportResult('smoke','csv')" disabled>导出 CSV</button>
@@ -453,7 +471,7 @@ document.querySelectorAll('.preset[data-v]').forEach(b => b.onclick = () => {
   document.querySelectorAll(`.preset[data-t="${p}"]`).forEach(x => x.classList.remove('active'));
   b.classList.add('active');
 });
-['mon', 'load'].forEach(p => ['lat', 'jit', 'down', 'up'].forEach(f => {
+['mon', 'load', 'smoke'].forEach(p => ['lat', 'jit', 'down', 'up'].forEach(f => {
   $(p + '-' + f).addEventListener('input', () =>
     document.querySelectorAll(`.preset[data-t="${p}"]`).forEach(x => x.classList.remove('active')));
 }));
@@ -463,19 +481,35 @@ function netParams(p) {
 }
 
 function exportResult(type, format) {
-  const name = (type === 'monitor' ? '采样监测结果' : '压测结果') + '.' + format;
-  fetch('/api/' + type + '/export?format=' + format)
-    .then(r => { if (!r.ok) throw new Error('导出失败: ' + r.status); return r.blob(); })
-    .then(blob => {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(a.href);
+  // 原生窗口:导出统一走后端接口,后端把结果写到「下载」目录并返回路径,前端 toast 展示。
+  // (WebView 既不支持 <a download>,JS→Java 桥的方法暴露也不稳定,走 HTTP 最可靠)
+  fetch('/api/export?type=' + type + '&format=' + format)
+    .then(r => r.json())
+    .then(j => {
+      if (j.ok) toast('已导出到: ' + j.path);
+      else toast('导出失败: ' + (j.error || '未知错误'), true);
     })
-    .catch(e => alert(e.message));
+    .catch(e => toast('导出失败: ' + e.message, true));
+}
+// 页面内通知条(不依赖原生对话框,保证在 WebView 里一定可见)
+function toast(msg, isErr) {
+  let t = document.getElementById('toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'toast';
+    t.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);'
+      + 'padding:12px 20px;border-radius:8px;z-index:9999;font-size:14px;'
+      + 'box-shadow:0 4px 16px rgba(0,0,0,.3);max-width:82%;word-break:break-all;'
+      + 'transition:opacity .25s;';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.background = isErr ? '#c0392b' : '#1e8449';
+  t.style.color = '#fff';
+  t.style.opacity = '1';
+  t.style.display = 'block';
+  if (t._timer) clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.style.opacity = '0'; setTimeout(() => { t.style.display = 'none'; }, 300); }, 8000);
 }
 function setExportEnabled(prefix, enabled) {
   ['csv', 'json'].forEach(f => {
@@ -581,8 +615,11 @@ async function post(url, params) {
 function ctx2d(id) {
   const cv = $(id), dpr = window.devicePixelRatio || 1;
   const w = cv.clientWidth || 400, h = cv.clientHeight || 200;
-  cv.width = w * dpr; cv.height = h * dpr;
-  const c = cv.getContext('2d'); c.scale(dpr, dpr);
+  const bw = Math.round(w * dpr), bh = Math.round(h * dpr);
+  // 仅尺寸变化时才重建画布(设 width/height 会清空并重分配位图,WebView 下开销大,勿每帧都设)
+  if (cv.width !== bw || cv.height !== bh) { cv.width = bw; cv.height = bh; }
+  const c = cv.getContext('2d');
+  c.setTransform(dpr, 0, 0, dpr, 0, 0); // setTransform 不会像 scale 那样累积
   return [c, w, h];
 }
 function lineChart(id, seriesArr, threshold) { // seriesArr: [{name, color, data:[{x,y}]}]
@@ -667,25 +704,38 @@ function renderSmokeResults(results) {
   if (!results.length) { $('smoke-result').innerHTML = '<div class="empty">无结果</div>'; return; }
   let html = '';
   results.forEach(r => {
-    html += `<h3 style="font-size:13px;color:#2c3e50;margin:10px 0 6px">${shortUrl(r.proto + '://' + r.url)} <span style="color:#7f8c9b">(${r.method})</span></h3>`;
-    html += `<details class="req-item"><summary>查看请求信息(请求头 / 请求体)</summary>`
+    const isWs = r.proto === 'ws' || r.proto === 'wss';
+    html += `<h3 style="font-size:13px;color:#2c3e50;margin:10px 0 6px">${shortUrl(r.proto + '://' + r.url)} <span style="color:#7f8c9b">(${isWs ? 'WS' : r.method})</span></h3>`;
+    html += `<details class="req-item"><summary>查看请求信息(请求头 / 请求体${isWs ? ' / WS消息' : ''})</summary>`
       + `<div class="req-block"><b>请求头</b><pre>${escHtml(r.reqHeaders || '(无)')}</pre></div>`
       + `<div class="req-block"><b>请求体</b><pre>${escHtml(r.reqBody || '(无)')}</pre></div></details>`;
-    html += '<table><tr><th>#</th><th>状态码</th><th>DNS(ms)</th><th>TCP连接(ms)</th><th>TLS(ms)</th><th>首字节(ms)</th><th>总耗时(ms)</th><th>服务端处理*</th></tr>';
-    r.rows.forEach(row => {
-      if (row.error) {
-        html += `<tr><td>${row.seq}</td><td class="num" colspan="7" style="color:#e0533d">请求失败:${escHtml(row.error)}</td></tr>`;
-      } else {
-        const server = row.firstByte - row.connect;
-        html += `<tr><td>${row.seq}</td><td class="num">${row.code}</td><td class="num">${row.dns}</td><td class="num">${row.connect}</td><td class="num">${row.tls}</td><td class="num">${row.firstByte}</td><td class="num"><b>${row.total}</b></td><td class="num" style="color:${server>500?'#e0533d':'#1a9c62'}">${server >= 0 ? server : '-'}</td></tr>`;
-      }
-    });
-    html += '</table>';
-    html += '<details class="req-item"><summary>查看响应体明细</summary>'
-      + r.rows.map(row => `<div class="req-block"><b>#${row.seq} 状态 ${row.code ?? '失败'} 总耗时 ${row.total ?? '-'}ms</b><pre>${escHtml(row.respBody || row.error || '(无响应体)')}</pre></div>`).join('')
-      + '</details>';
+    if (isWs) {
+      html += '<table><tr><th>#</th><th>结果</th><th>往返耗时(ms)</th><th>回复内容</th></tr>';
+      r.rows.forEach(row => {
+        if (row.error) {
+          html += `<tr><td>${row.seq}</td><td class="num" colspan="3" style="color:#e0533d">失败:${escHtml(row.error)}</td></tr>`;
+        } else {
+          html += `<tr><td>${row.seq}</td><td class="num" style="color:#1a9c62">OK</td><td class="num"><b>${row.total}</b></td><td><pre style="margin:0;max-height:120px;overflow:auto;white-space:pre-wrap;word-break:break-all">${escHtml(row.respBody || '(无)')}</pre></td></tr>`;
+        }
+      });
+      html += '</table>';
+    } else {
+      html += '<table><tr><th>#</th><th>状态码</th><th>DNS(ms)</th><th>TCP连接(ms)</th><th>TLS(ms)</th><th>首字节(ms)</th><th>总耗时(ms)</th><th>服务端处理*</th></tr>';
+      r.rows.forEach(row => {
+        if (row.error) {
+          html += `<tr><td>${row.seq}</td><td class="num" colspan="7" style="color:#e0533d">请求失败:${escHtml(row.error)}</td></tr>`;
+        } else {
+          const server = row.firstByte - row.connect;
+          html += `<tr><td>${row.seq}</td><td class="num">${row.code}</td><td class="num">${row.dns}</td><td class="num">${row.connect}</td><td class="num">${row.tls}</td><td class="num">${row.firstByte}</td><td class="num"><b>${row.total}</b></td><td class="num" style="color:${server>500?'#e0533d':'#1a9c62'}">${server >= 0 ? server : '-'}</td></tr>`;
+        }
+      });
+      html += '</table>';
+      html += '<details class="req-item"><summary>查看响应体明细</summary>'
+        + r.rows.map(row => `<div class="req-block"><b>#${row.seq} 状态 ${row.code ?? '失败'} 总耗时 ${row.total ?? '-'}ms</b><pre>${escHtml(row.respBody || row.error || '(无响应体)')}</pre></div>`).join('')
+        + '</details>';
+    }
   });
-  html += '<div class="hint">* 服务端处理 = 首字节 − TCP连接,该值大说明慢在服务端,进入第②③步</div>';
+  html += '<div class="hint">* 服务端处理 = 首字节 − TCP连接,该值大说明慢在服务端,进入第②③步(ws/wss 无 DNS/TCP/TLS 阶段,直接看往返耗时)</div>';
   $('smoke-result').innerHTML = html;
 }
 $('smoke-run').onclick = async () => {
@@ -697,7 +747,7 @@ $('smoke-run').onclick = async () => {
   $('smoke-status').innerHTML = '<span class="running">运行中...</span>';
   try {
     const results = await post('/api/smoke', {
-      ...t.params, count: $('smoke-count').value, ...getTokenParams('smoke'), rate: $('smoke-rate').value || 0
+      ...t.params, count: $('smoke-count').value, ...getTokenParams('smoke'), ...netParams('smoke')
     });
     loadHistoryInterfaces();
     renderSmokeResults(results);

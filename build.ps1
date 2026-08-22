@@ -11,7 +11,7 @@ $VERSION = "1.0.0"
 # Windows 下 jpackage 对非 ASCII 应用名支持不佳,用 ASCII 名(窗口标题仍为"压测")
 $APP_NAME = "PerfTest"
 $MAIN_CLASS = "Launcher"
-$JAVAFX_VER = "21.0.4"
+$JAVAFX_VER = "21.0.12"
 $JAVAFX_DIR = "javafx-sdk-$JAVAFX_VER"
 
 # 0) 下载 JavaFX(缺失时)

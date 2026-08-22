@@ -76,6 +76,7 @@ public class PerfServer {
         server.createContext("/api/load/status", PerfServer::handleLoadStatus);
         server.createContext("/api/monitor/export", PerfServer::handleMonitorExport);
         server.createContext("/api/load/export", PerfServer::handleLoadExport);
+        server.createContext("/api/export", PerfServer::handleExport);
         server.createContext("/api/history/list", PerfServer::handleHistoryList);
         server.createContext("/api/history/get", PerfServer::handleHistoryGet);
         server.createContext("/api/history/delete", PerfServer::handleHistoryDelete);
@@ -454,31 +455,54 @@ public class PerfServer {
         }
         String verr = validateSpecs(specs);
         if (verr != null) { respond(ex, 400, "text/plain; charset=utf-8", verr); return; }
-        for (TargetSpec s : specs) {
-            if (s.ws()) { respond(ex, 400, "text/plain; charset=utf-8", "冒烟测试不支持 ws/wss 协议,请改用 http/https"); return; }
-        }
         int count = clamp(intOr(p.get("count"), 5), 1, 20);
         String token = p.getOrDefault("token", "").trim();
         String tokenName = p.getOrDefault("tokenName", "authorization");
-        int rate = clamp(intOr(p.get("rate"), 0), 0, 100000);
+        int[] net = netOf(p);
         String[] tokenHeader = headerFromToken(token, tokenName);
+        HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
         List<SmokeResult> results = new ArrayList<>();
         for (TargetSpec s : specs) {
             SmokeResult sr = new SmokeResult();
             sr.url = s.url;
             sr.proto = s.proto;
-            sr.method = s.method;
-            sr.body = s.body;
+            sr.method = s.ws() ? "WS" : s.method;
+            sr.body = s.ws() ? s.wsMessage : s.body;
             StringBuilder hb = new StringBuilder();
             if (tokenHeader != null) hb.append(tokenHeader[0]).append(": ").append(tokenHeader[1]).append("\n");
             for (String[] h : s.headers) hb.append(h[0]).append(": ").append(h[1]).append("\n");
             sr.reqHeaders = hb.toString();
             String full = s.fullUri().toString();
+            WsClient ws = null;
             for (int i = 1; i <= count; i++) {
-                sr.rows.add(runCurl(full, s.method, s.body, tokenHeader, s.headers, rate, i));
+                applyLatency(net); // 弱网:模拟 RTT/抖动(与监测、压测一致)
+                if (s.ws()) {
+                    SmokeRow row = new SmokeRow();
+                    row.seq = i;
+                    if (ws == null) {
+                        try { ws = new WsClient(client, s.fullUri()); }
+                        catch (Exception e) { row.error = abbreviate("WS连接失败: " + e.getClass().getSimpleName()); }
+                    }
+                    if (row.error == null) {
+                        try {
+                            String[] r = ws.roundTrip(s.wsMessage);
+                            row.total = Long.parseLong(r[0]);
+                            row.firstByte = row.total;
+                            row.respBody = r[1];
+                        } catch (Exception e) {
+                            row.error = abbreviate("WS: " + e.getClass().getSimpleName());
+                            ws.closeQuietly();
+                            ws = null;
+                        }
+                    }
+                    sr.rows.add(row);
+                } else {
+                    sr.rows.add(runCurl(full, s.method, s.body, tokenHeader, s.headers, net, i));
+                }
                 Thread.sleep(200);
             }
+            if (ws != null) ws.closeQuietly();
             results.add(sr);
         }
         lastSmoke = results;
@@ -515,7 +539,7 @@ public class PerfServer {
         respond(ex, 200, "application/json; charset=utf-8", sb.toString());
     }
 
-    static SmokeRow runCurl(String url, String method, String body, String[] tokenHeader, List<String[]> headers, int rate, int seq) throws Exception {
+    static SmokeRow runCurl(String url, String method, String body, String[] tokenHeader, List<String[]> headers, int[] net, int seq) throws Exception {
         SmokeRow row = new SmokeRow();
         row.seq = seq;
         Path bodyFile = Files.createTempFile("perf-smoke", ".body");
@@ -529,7 +553,8 @@ public class PerfServer {
             cmd.add("-H"); cmd.add("Content-Type: application/json");
             cmd.add("--data"); cmd.add(body);
         }
-        if (rate > 0) { cmd.add("--limit-rate"); cmd.add(rate + "K"); }
+        long downKBs = (net != null && net[2] > 0) ? net[2] / 1024 : 0; // 弱网下行限速 -> curl --limit-rate
+        if (downKBs > 0) { cmd.add("--limit-rate"); cmd.add(downKBs + "K"); }
         cmd.add(url);
 
         ProcessBuilder pb = new ProcessBuilder(cmd);
@@ -1381,6 +1406,30 @@ public class PerfServer {
         }
     }
 
+    /** 原生窗口导出:把结果写到「下载」目录,返回保存路径给前端展示(避免依赖原生保存对话框) */
+    static void handleExport(HttpExchange ex) throws IOException {
+        Map<String, String> q = query(ex);
+        String type = q.getOrDefault("type", "smoke");
+        String format = ("json".equalsIgnoreCase(q.get("format"))) ? "json" : "csv";
+        try {
+            String content = exportContent(type, format);
+            if (content == null) {
+                respond(ex, 200, "application/json; charset=utf-8",
+                        "{\"ok\":false,\"error\":" + json("暂无数据,请先运行对应测试") + "}");
+                return;
+            }
+            String base = "monitor".equals(type) ? "采样监测结果" : "压测结果";
+            File downloads = new File(System.getProperty("user.home"), "Downloads");
+            File target = uniqueFile(new File(downloads, base + "." + format));
+            Files.write(target.toPath(), content.getBytes(StandardCharsets.UTF_8));
+            respond(ex, 200, "application/json; charset=utf-8",
+                    "{\"ok\":true,\"path\":" + json(target.getAbsolutePath()) + "}");
+        } catch (Exception e) {
+            respond(ex, 500, "application/json; charset=utf-8",
+                    "{\"ok\":false,\"error\":" + json(String.valueOf(e.getMessage())) + "}");
+        }
+    }
+
     static String smokeJson() {
         StringBuilder sb = new StringBuilder("[");
         for (int r = 0; r < lastSmoke.size(); r++) {
@@ -1412,10 +1461,15 @@ public class PerfServer {
         sb.append("导出时间,").append(csv(nowStr())).append("\r\n\r\n");
         sb.append("接口,方法,序号,DNS(ms),TCP连接(ms),TLS(ms),首字节(ms),总耗时(ms),状态码/错误,响应体\r\n");
         for (SmokeResult sr : lastSmoke) {
+            boolean ws = "ws".equals(sr.proto) || "wss".equals(sr.proto);
             for (SmokeRow row : sr.rows) {
-                sb.append(csv(sr.url)).append(",").append(sr.method).append(",").append(row.seq).append(",");
+                sb.append(csv(sr.url)).append(",").append(ws ? "WS" : sr.method).append(",").append(row.seq).append(",");
                 if (row.error != null) {
                     sb.append(",,,,,,").append(csv(row.error)).append(",\r\n");
+                } else if (ws) {
+                    // ws/wss 无 DNS/TCP/TLS 阶段,总耗时=往返耗时,状态码列写 WS
+                    sb.append(",,,,").append(row.total).append(",WS,")
+                      .append(csv(truncate(row.respBody, 2000))).append("\r\n");
                 } else {
                     sb.append(row.dns).append(",").append(row.connect).append(",").append(row.tls).append(",")
                       .append(row.firstByte).append(",").append(row.total).append(",").append(row.code).append(",")
@@ -1851,5 +1905,42 @@ public class PerfServer {
         ex.getResponseHeaders().set("Content-Type", type);
         ex.sendResponseHeaders(code, bytes.length);
         try (OutputStream os = ex.getResponseBody()) { os.write(bytes); }
+    }
+
+    /**
+     * 供 JavaFX 窗口模式直接导出(WebView 不支持 &lt;a download&gt;,改由原生保存对话框落盘)。
+     * 返回导出内容字符串,无数据时返回 null。type: smoke/monitor/load;format: csv/json。
+     */
+    /** 目标文件已存在时自动加 (2)、(3)… 序号,避免覆盖同名文件 */
+    static File uniqueFile(File f) {
+        if (!f.exists()) return f;
+        String name = f.getName();
+        int dot = name.lastIndexOf('.');
+        String base = dot > 0 ? name.substring(0, dot) : name;
+        String ext = dot > 0 ? name.substring(dot) : "";
+        File parent = f.getParentFile();
+        for (int i = 2; ; i++) {
+            File alt = new File(parent, base + "(" + i + ")" + ext);
+            if (!alt.exists()) return alt;
+        }
+    }
+
+    public static String exportContent(String type, String format) {
+        boolean csv = "csv".equalsIgnoreCase(format);
+        switch (type == null ? "" : type) {
+            case "smoke":
+                if (lastSmoke == null || lastSmoke.isEmpty()) return null;
+                return csv ? smokeCsv() : smokeJson();
+            case "monitor":
+                Monitor m = monitor;
+                if (m == null || m.targets.isEmpty()) return null;
+                return csv ? monitorCsv(m) : monitorJson(m);
+            case "load":
+                LoadTest lt = loadTest;
+                if (lt == null || lt.totalReqs() == 0) return null;
+                return csv ? loadCsv(lt) : loadJson(lt);
+            default:
+                return null;
+        }
     }
 }

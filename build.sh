@@ -8,7 +8,7 @@ cd "$(dirname "$0")"
 VERSION="1.0.0"
 APP_NAME="压测"
 MAIN_CLASS="Launcher"
-JAVAFX_VER="21.0.4"
+JAVAFX_VER="21.0.12"
 JAVAFX_DIR="javafx-sdk-${JAVAFX_VER}"
 
 # 0) 下载 JavaFX(缺失时)
