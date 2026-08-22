@@ -1,0 +1,51 @@
+# 一次触发,双平台并行打包(macOS .dmg + Windows .exe)
+# 触发方式:
+#   1) 手动: GitHub 仓库 Actions 页 -> Run workflow
+#   2) 打 tag(如 v1.0.0)并 push 自动触发
+# 产物: 每个平台的安装包上传为 workflow artifact
+name: build-both
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            ext: dmg
+          - os: windows-latest
+            ext: exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: 打包 macOS
+        if: runner.os == 'macOS'
+        run: |
+          chmod +x build.sh
+          ./build.sh
+
+      - name: 打包 Windows
+        if: runner.os == 'Windows'
+        run: cmd /c build.bat
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-test-1.0.0-${{ matrix.os }}
+          path: |
+            *.dmg
+            *.exe
+          if-no-files-found: error

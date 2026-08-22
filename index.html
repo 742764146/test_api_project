@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>接口性能测试平台</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f7fa; color: #2c3e50; min-width: 800px; min-height: 800px; }
+  .foot { text-align: center; color: #9aa7b5; font-size: 12px; margin-top: 24px; padding: 14px 0;
+          border-top: 1px solid #e8edf3; display: flex; gap: 28px; justify-content: center; align-items: center; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: #7f8c9b; font-size: 13px; margin-bottom: 20px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+  .tab { padding: 10px 22px; border: 1px solid #d7dde6; background: #fff; border-radius: 8px 8px 0 0; cursor: pointer; font-size: 14px; border-bottom: none; }
+  .tab.active { background: #3468e0; color: #fff; border-color: #3468e0; font-weight: 600; }
+  .panel { display: none; background: #fff; border: 1px solid #d7dde6; border-radius: 0 8px 8px 8px; padding: 20px; }
+  .panel.active { display: block; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 16px; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 12px; color: #7f8c9b; }
+  .field input, .field select, .field textarea {
+    padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; font-family: inherit;
+  }
+  .field .url { width: 420px; }
+  .field textarea { width: 480px; height: 64px; resize: vertical; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+  button { padding: 9px 24px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 600; }
+  button.primary { background: #3468e0; color: #fff; }
+  button.danger { background: #e0533d; color: #fff; }
+  button:disabled { background: #b8c2ce; cursor: not-allowed; }
+  button.preset { background: #edf2fa; color: #3468e0; padding: 8px 14px; font-size: 12px; font-weight: 500; }
+  button.preset.active { background: #3468e0; color: #fff; }
+  .net-tag { display: inline-block; background: #fff4e0; color: #d98b00; border-radius: 4px; padding: 2px 8px; font-size: 12px; margin-left: 8px; }
+  /* 接口配置卡片:URL 行 + 参数/请求头独立一排 */
+  .tcard { border: 1px solid #dfe6ef; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; background: #fbfcfe; }
+  .tcard-main { display: grid; grid-template-columns: 1fr 96px 110px 36px; gap: 8px; margin-bottom: 8px; align-items: center; }
+  .tcard-main input, .tcard-main select {
+    padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px;
+    font-family: ui-monospace, Menlo, monospace; width: 100%;
+  }
+  .tcard-kvs { display: flex; gap: 28px; flex-wrap: wrap; }  /* 请求参数与请求头之间的间隔 */
+  .tcard-kv { flex: 1; min-width: 300px; }
+  /* 删除按钮(✕ 居中) */
+  .t-del { background: #fdecea; color: #e0533d; border: none; border-radius: 6px; cursor: pointer;
+           font-size: 13px; line-height: 1; height: 36px; width: 36px;
+           display: inline-flex; align-items: center; justify-content: center; }
+  .kv-del { background: #fdecea; color: #e0533d; border: none; border-radius: 6px; cursor: pointer;
+            font-size: 12px; line-height: 1; height: 31px; width: 26px;
+            display: inline-flex; align-items: center; justify-content: center; }
+  .t-del.disabled, .kv-del.disabled { opacity: .25; cursor: default; }
+  /* Key-Value 输入组件(请求头/请求参数):[勾选] Key Value [删除] */
+  .kv { display: flex; flex-direction: column; gap: 5px; }
+  .kv-row { display: grid; grid-template-columns: 15px 1fr 1.3fr 26px; gap: 6px; align-items: center; }
+  .kv-row input:not([type=checkbox]) {
+    padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12px;
+    font-family: ui-monospace, Menlo, monospace; width: 100%;
+  }
+  .kv-row input:not([type=checkbox]):focus { border-color: #3468e0; outline: none; box-shadow: 0 0 0 2px rgba(52,104,224,.12); }
+  .kv-on { margin: 0; cursor: pointer; }
+  .kv-row.off .kv-k, .kv-row.off .kv-v { opacity: .45; }
+  .kv-cap { font-size: 11px; color: #90a0b0; margin-bottom: 1px; }
+  .row-kv { gap: 32px; align-items: flex-start; }
+  .kv-disabled { opacity: .4; pointer-events: none; }
+  .kv-addbtn { margin-top: 4px; align-self: flex-start; background: #eef2f8; color: #3468e0; border: 1px dashed #b9c8e4;
+               border-radius: 6px; padding: 3px 12px; font-size: 11px; cursor: pointer; }
+  .kv-addbtn:hover { background: #e2ebfa; }
+  /* WebSocket 区块 */
+  .ws-box { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #e2e8f0; }
+  .t-wsmsg { width: 100%; min-height: 76px; padding: 9px 10px; border: 1px solid #cbd5e1; border-radius: 6px;
+             font-family: ui-monospace, Menlo, monospace; font-size: 13px; resize: vertical; box-sizing: border-box; }
+  .ws-log { max-height: 190px; overflow-y: auto; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
+            padding: 8px 10px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; line-height: 1.7; }
+  .ws-msg { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ws-msg .time { color: #90a0b0; }
+  .ws-msg .dir-S { color: #3468e0; font-weight: 600; }
+  .ws-msg .dir-R { color: #1a9c62; font-weight: 600; }
+  .kv-hint { font-size: 11px; color: #a0aec0; padding: 4px 0; }
+  .cards { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+  .card { flex: 1; min-width: 110px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; }
+  .card .v { font-size: 22px; font-weight: 700; }
+  .card .v.warn { color: #e0533d; }
+  .card .t { font-size: 12px; color: #7f8c9b; margin-top: 2px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 16px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid #e8edf3; text-align: left; }
+  th { background: #f8fafc; color: #7f8c9b; font-weight: 600; }
+  td.num { font-family: ui-monospace, Menlo, monospace; }
+  .charts { display: flex; flex-wrap: wrap; gap: 16px; }
+  .chart-box { flex: 1; min-width: 380px; }
+  .chart-box h3 { font-size: 13px; color: #7f8c9b; font-weight: 600; margin-bottom: 6px; }
+  canvas { width: 100%; height: 200px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+  .hint { font-size: 12px; color: #90a0b0; margin-top: 6px; line-height: 1.7; }
+  .status { font-size: 13px; margin-left: 10px; }
+  .ok { color: #1a9c62; } .err { color: #e0533d; } .running { color: #d98b00; }
+  .empty { color: #a0aec0; font-size: 13px; padding: 20px 0; text-align: center; }
+  pre.errors { background: #2d3748; color: #febcb8; padding: 10px; border-radius: 6px; font-size: 12px; max-height: 120px; overflow: auto; }
+  .op { padding: 4px 10px; font-size: 12px; margin-right: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>后端接口性能测试平台</h1>
+  <div class="sub">冒烟定位 -> 采样监测(抓偶发慢)-> 阶梯压测 | 服务端执行,不受浏览器并发限制 | 压测记录自动保存可复用</div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="smoke">① 冒烟测试</div>
+    <div class="tab" data-tab="monitor">② 采样监测</div>
+    <div class="tab" data-tab="load">③ 压力测试</div>
+  </div>
+
+  <!-- 冒烟测试 -->
+  <div class="panel active" id="panel-smoke">
+    <div class="field" style="margin-bottom:10px"><label>接口列表(每个接口一张卡片,可单独配置协议 / 方法 / Body / 请求参数 / 请求头,最多 10 个)</label>
+      <div id="smoke-rows"></div>
+    </div>
+    <div class="row">
+      <button class="preset" onclick="addTargetRow('smoke', {}, ['http','https'])">+ 添加接口</button>
+      <div class="field"><label>历史接口</label><select id="smoke-hist" onchange="useHistory('smoke', this)"><option value="">选择历史接口...</option></select></div>
+      <div class="field"><label>每个接口请求次数</label><input id="smoke-count" type="number" value="5" min="1" max="20" style="width:90px"></div>
+      <div class="field"><label>Token(全局,可选)</label><input id="smoke-token" placeholder="Bearer Token 或 X-Token: xxx" style="width:200px"></div>
+      <div class="field"><label>限速KB/s(可选)</label><input id="smoke-rate" type="number" min="0" placeholder="0=不限" style="width:100px"></div>
+      <button class="primary" id="smoke-run">运行</button>
+      <button class="danger" id="smoke-clear">清除</button>
+      <span class="status" id="smoke-status"></span>
+    </div>
+    <div class="row">
+      <button class="preset" onclick="exportResult('smoke','csv')">导出 CSV</button>
+      <button class="preset" onclick="exportResult('smoke','json')">导出 JSON</button>
+      <span class="hint">导出当前冒烟结果(每个接口的分阶段耗时)</span>
+    </div>
+    <div id="smoke-result"><div class="empty">配置接口后运行,查看每个接口的分阶段耗时(DNS / TCP / TLS / 首字节 / 总耗时)</div></div>
+    <div class="hint">
+      判读:dns 高 -> DNS 问题;connect 高 -> 网络链路;tls 高 -> 握手慢;
+      <b>firstByte − connect 高 -> 服务端处理慢</b>;total − firstByte 高 -> 响应体过大/带宽不足。
+    </div>
+  </div>
+
+  <!-- 采样监测 -->
+  <div class="panel" id="panel-monitor">
+    <div class="field" style="margin-bottom:10px"><label>接口列表(每个接口一张卡片,可单独配置方法 / Body / 请求参数 / 请求头,最多 10 个)</label>
+      <div id="mon-rows"></div>
+    </div>
+    <div class="row">
+      <button class="preset" onclick="addTargetRow('mon')">+ 添加接口</button>
+      <div class="field"><label>历史接口</label><select id="mon-hist" onchange="useHistory('mon', this)"><option value="">选择历史接口...</option></select></div>
+      <div class="field"><label>时长(秒)</label><input id="mon-duration" type="number" value="600" style="width:90px"></div>
+      <div class="field"><label>间隔(秒)</label><input id="mon-interval" type="number" value="2" style="width:90px"></div>
+      <div class="field"><label>慢阈值(ms)</label><input id="mon-threshold" type="number" value="500" style="width:100px"></div>
+      <div class="field"><label>Token(全局,可选)</label><input id="mon-token" placeholder="Bearer Token 或 X-Token: xxx" style="width:200px"></div>
+      <button class="primary" id="mon-start">开始监测</button>
+      <button class="danger" id="mon-stop" disabled>停止</button>
+      <button class="danger" id="mon-clear">清除</button>
+      <span class="status" id="mon-status"></span>
+    </div>
+    <div class="row">
+      <div class="field"><label>弱网模拟(可选):延迟ms / 抖动ms / 下行KB/s / 上行KB/s,0=不限</label>
+        <div style="display:flex;gap:6px">
+          <input id="mon-lat" type="number" min="0" value="0" style="width:80px">
+          <input id="mon-jit" type="number" min="0" value="0" style="width:80px">
+          <input id="mon-down" type="number" min="0" value="0" style="width:90px">
+          <input id="mon-up" type="number" min="0" value="0" style="width:90px">
+        </div>
+      </div>
+      <div class="field"><label>网络预设</label>
+        <div style="display:flex;gap:6px">
+          <button class="preset active" data-t="mon" data-v="0,0,0,0">正常</button>
+          <button class="preset" data-t="mon" data-v="60,20,1500,400">4G</button>
+          <button class="preset" data-t="mon" data-v="200,80,300,100">3G</button>
+          <button class="preset" data-t="mon" data-v="400,150,50,30">弱3G</button>
+        </div>
+      </div>
+    </div>
+    <div class="row">
+      <button class="preset" onclick="exportResult('monitor','csv')">导出 CSV</button>
+      <button class="preset" onclick="exportResult('monitor','json')">导出 JSON</button>
+      <span class="hint">导出当前监测结果(汇总 / 分接口 / 采样明细 / 慢请求)</span>
+    </div>
+    <div class="cards" id="mon-cards"></div>
+    <div class="charts">
+      <div class="chart-box"><h3 id="mon-chart-title">响应延迟走势(ms,红线为慢阈值)</h3><canvas id="mon-chart"></canvas></div>
+    </div>
+    <h3 style="font-size:13px;color:#7f8c9b;margin:14px 0 6px">分接口统计</h3>
+    <div id="mon-targets"><div class="empty">开始监测后,每个接口的采样数与分位数会分别统计</div></div>
+    <h3 style="font-size:13px;color:#7f8c9b;margin:14px 0 6px">慢请求 / 异常记录(最新 50 条)</h3>
+    <div id="mon-slow"><div class="empty">开始监测后,超过阈值的请求会记录在此。观察时间戳是否有周期规律。</div></div>
+  </div>
+
+  <!-- 压力测试 -->
+  <div class="panel" id="panel-load">
+    <div class="field" style="margin-bottom:10px"><label>接口列表(每个接口一张卡片,可单独配置方法 / Body / 请求参数 / 请求头,最多 10 个)</label>
+      <div id="load-rows"></div>
+    </div>
+    <div class="row">
+      <button class="preset" onclick="addTargetRow('load')">+ 添加接口</button>
+      <div class="field"><label>历史接口</label><select id="load-hist" onchange="useHistory('load', this)"><option value="">选择历史接口...</option></select></div>
+      <div class="field"><label>Token(全局,可选)</label><input id="load-token" placeholder="Bearer Token 或 X-Token: xxx" style="width:200px"></div>
+      <div class="field"><label>阶段配置:每阶段「时长秒 并发」,逗号分隔</label>
+        <input id="load-stages" value="60 5,180 20,180 50,180 100,180 200" style="width:420px;font-family:ui-monospace,Menlo,monospace">
+      </div>
+      <button class="primary" id="load-start">开始压测</button>
+      <button class="danger" id="load-stop" disabled>停止</button>
+      <button class="danger" id="load-clear">清除</button>
+      <span class="status" id="load-status"></span>
+    </div>
+    <div class="row">
+      <div class="field"><label>弱网模拟(可选):延迟ms / 抖动ms / 下行KB/s / 上行KB/s,0=不限</label>
+        <div style="display:flex;gap:6px">
+          <input id="load-lat" type="number" min="0" value="0" style="width:80px">
+          <input id="load-jit" type="number" min="0" value="0" style="width:80px">
+          <input id="load-down" type="number" min="0" value="0" style="width:90px">
+          <input id="load-up" type="number" min="0" value="0" style="width:90px">
+        </div>
+      </div>
+      <div class="field"><label>网络预设</label>
+        <div style="display:flex;gap:6px">
+          <button class="preset active" data-t="load" data-v="0,0,0,0">正常</button>
+          <button class="preset" data-t="load" data-v="60,20,1500,400">4G</button>
+          <button class="preset" data-t="load" data-v="200,80,300,100">3G</button>
+          <button class="preset" data-t="load" data-v="400,150,50,30">弱3G</button>
+        </div>
+      </div>
+    </div>
+    <div class="row">
+      <button class="preset" onclick="exportResult('load','csv')">导出 CSV</button>
+      <button class="preset" onclick="exportResult('load','json')">导出 JSON</button>
+      <span class="hint">导出当前压测结果(汇总 / 分接口 / 阶段结果 / 错误分布)</span>
+    </div>
+    <div class="cards" id="load-cards"></div>
+    <div class="charts">
+      <div class="chart-box"><h3>每秒 QPS(柱)与平均延迟 ms(线)</h3><canvas id="load-chart"></canvas></div>
+      <div class="chart-box"><h3>延迟分位数(ms)</h3><canvas id="load-pct"></canvas></div>
+    </div>
+    <h3 style="font-size:13px;color:#7f8c9b;margin:14px 0 6px">分接口实时统计</h3>
+    <div id="load-targets"><div class="empty">压测开始后,每个接口的 QPS 与分位数会分别统计</div></div>
+    <h3 style="font-size:13px;color:#7f8c9b;margin:14px 0 6px">阶段结果(全局汇总)</h3>
+    <div id="load-stages-tbl"><div class="empty">压测开始后,每个阶段结束会在此汇总 QPS 与 P95/P99</div></div>
+    <div id="load-errors"></div>
+    <div class="hint">
+      阶梯加压找容量拐点:并发上升但 QPS 不再增长、延迟陡增处即为拐点,生产容量建议控制在拐点 70% 以内。
+      多接口同时压测时,<b>每个接口都会分配到完整的配置并发数</b>(如配 100 并发、3 个接口,总并发为 300),用于模拟混合流量场景;
+      若要单独测某接口,请只配置一行。压测同时请在服务端观察 CPU / 内存 / DB 连接。
+    </div>
+    <h3 style="font-size:13px;color:#7f8c9b;margin:18px 0 6px;border-top:1px solid #e8edf3;padding-top:14px">压测记录(每次压测自动保存,可查看 / 复用配置 / 删除)</h3>
+    <div id="load-history"><div class="empty">加载中...</div></div>
+    <div id="load-history-detail"></div>
+  </div>
+
+  <footer class="foot">
+    <span>压测 · v1.0.0</span>
+    <span>开发人员：一叶知秋</span>
+  </footer>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = n => n == null ? '-' : (n >= 1000 ? (n/1000).toFixed(1)+'k' : String(n));
+const COLORS = ['#3468e0', '#e0533d', '#1a9c62', '#d98b00', '#8e6fd8', '#0ea5c6', '#c2410c', '#0f766e', '#a21caf', '#475569'];
+const shortUrl = u => u.replace(/^https?:\/\//, '').replace(/\/$/, '').slice(0, 38);
+const escAttr = s => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+
+// ---------- Tab 切换 ----------
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  $('panel-' + t.dataset.tab).classList.add('active');
+});
+
+// ---------- Key-Value 输入组件(请求头/请求参数) ----------
+// 每行:[勾选(选中才携带)] Key Value [删除];最后一行输入后自动追加空行;仅剩一行时不可删除
+function kvAdd(target, k = '', v = '', checked = true) {
+  const el = typeof target === 'string' ? $(target) : target;
+  const row = document.createElement('div');
+  row.className = 'kv-row' + (checked ? '' : ' off');
+  row.innerHTML = `<input type="checkbox" class="kv-on" ${checked ? 'checked' : ''} title="勾选后携带该行,取消则不携带">
+<input class="kv-k" placeholder="Key" value="${escAttr(k)}"><input class="kv-v" placeholder="Value" value="${escAttr(v)}"><button class="kv-del" title="删除该行">✕</button>`;
+  row.querySelector('.kv-on').onchange = e => row.classList.toggle('off', !e.target.checked);
+  row.querySelector('.kv-del').onclick = () => {
+    if (el.querySelectorAll('.kv-row').length <= 1) return; // 仅剩一行不可删除
+    row.remove();
+    kvRefresh(el);
+  };
+  el.appendChild(row);
+  kvRefresh(el);
+}
+function kvRefresh(el) { // 仅剩一行时禁用删除按钮
+  const single = el.querySelectorAll('.kv-row').length <= 1;
+  el.querySelectorAll('.kv-del').forEach(b => b.classList.toggle('disabled', single));
+}
+function kvPairs(target) { // -> [[k, v], ...](只取勾选且 Key 非空的行)
+  const el = typeof target === 'string' ? $(target) : target;
+  return Array.from(el.querySelectorAll('.kv-row'))
+    .filter(r => r.querySelector('.kv-on').checked)
+    .map(r => [r.querySelector('.kv-k').value.trim(), r.querySelector('.kv-v').value.trim()])
+    .filter(([k]) => k);
+}
+function kvText(target) { return kvPairs(target).map(([k, v]) => k + ': ' + v).join('\n'); }          // -> "Key: Value" 行,供请求头
+function kvQuery(target) { return kvPairs(target).map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&'); } // -> "k=v&k2=v2"
+document.addEventListener('input', e => { // 最后一行有输入时自动加一行空行
+  const row = e.target.closest('.kv-row');
+  if (!row || !(e.target.classList.contains('kv-k') || e.target.classList.contains('kv-v'))) return;
+  const cont = row.parentElement;
+  if (row === cont.lastElementChild && (row.querySelector('.kv-k').value || row.querySelector('.kv-v').value)) kvAdd(cont);
+});
+
+// ---------- 接口配置卡片(仅剩一个接口时不可删除) ----------
+function refreshTrowDels(prefix) {
+  const dels = $(prefix + '-rows').querySelectorAll('.t-del');
+  const single = dels.length <= 1;
+  dels.forEach(b => b.classList.toggle('disabled', single));
+}
+function updateProtoUI(row) { // 切换协议时,禁用/启用方法、请求参数,显示/隐藏 WS 消息区
+  const p = row.querySelector('.t-proto').value;
+  const isWs = p === 'ws' || p === 'wss';
+  row.querySelector('.t-method').disabled = isWs;
+  row.querySelector('.params-wrap').classList.toggle('kv-disabled', isWs);
+  row.querySelector('.ws-box').style.display = isWs ? 'block' : 'none';
+}
+function addTargetRow(prefix, spec = {}, protocols = ['http', 'https', 'ws', 'wss']) {
+  const m = String(spec.method || 'GET').toUpperCase();
+  const proto = spec.proto || (String(spec.url || '').startsWith('wss://') ? 'wss'
+    : String(spec.url || '').startsWith('ws://') ? 'ws'
+    : String(spec.url || '').startsWith('https://') ? 'https' : 'http');
+  const row = document.createElement('div');
+  row.className = 'tcard';
+  row.innerHTML = `
+    <div class="tcard-main">
+      <input class="t-url" placeholder="api.example.com/path(不含协议)" value="${escAttr(spec.url || '')}">
+      <select class="t-proto">${protocols.map(x => `<option ${proto === x ? 'selected' : ''}>${x}</option>`).join('')}</select>
+      <select class="t-method">${['GET', 'POST', 'PUT', 'DELETE'].map(x => `<option ${m === x ? 'selected' : ''}>${x}</option>`).join('')}</select>
+      <button class="t-del" title="删除该接口">✕</button>
+    </div>
+    <div class="tcard-kvs">
+      <div class="tcard-kv params-wrap"><div class="kv-cap">请求参数(可选,勾选后携带;ws 下禁用)</div><div class="kv t-params"></div><button class="kv-addbtn">+ 添加参数</button></div>
+      <div class="tcard-kv"><div class="kv-cap">请求头(可选,勾选后携带)</div><div class="kv t-kv"></div><button class="kv-addbtn">+ 添加请求头</button></div>
+    </div>
+    <div class="ws-box" style="display:none">
+      <div class="kv-cap">WS 消息内容(每次循环发送一次,可多行 JSON 或文本)</div>
+      <textarea class="t-wsmsg" placeholder='{"action":"ping","ts":123}'>${escAttr(spec.wsMessage || '')}</textarea>
+      <div class="kv-cap" style="margin-top:8px">消息收发记录(S=发送 / R=接收,含时间)</div>
+      <div class="ws-log"><div class="empty">运行后显示最近收发消息</div></div>
+    </div>`;
+  // 请求参数:复用历史记录时从 query 字符串还原为 KV 行
+  const pq = row.querySelector('.t-params');
+  if (spec.query) {
+    spec.query.split('&').forEach(pv => {
+      const i = pv.indexOf('=');
+      kvAdd(pq, decodeURIComponent(pv.slice(0, i)), i >= 0 ? decodeURIComponent(pv.slice(i + 1)) : '');
+    });
+  }
+  kvAdd(pq);
+  // 请求头:复用历史记录时从对象还原为 KV 行
+  const kv = row.querySelector('.t-kv');
+  const entries = spec.headers && typeof spec.headers === 'object' ? Object.entries(spec.headers) : [];
+  if (entries.length) entries.forEach(([k, v]) => kvAdd(kv, k, v));
+  kvAdd(kv);
+  row.querySelector('.t-proto').addEventListener('change', () => updateProtoUI(row));
+  row.querySelectorAll('.kv-addbtn').forEach(btn => btn.onclick = () => kvAdd(btn.previousElementSibling));
+  row.querySelector('.t-del').onclick = () => {
+    if ($(prefix + '-rows').querySelectorAll('.tcard').length <= 1) return; // 仅剩一个接口不可删除
+    row.remove();
+    refreshTrowDels(prefix);
+  };
+  updateProtoUI(row);
+  $(prefix + '-rows').appendChild(row);
+  refreshTrowDels(prefix);
+}
+function collectTargets(prefix) { // 收集为 t0.url / t0.proto / t0.method / t0.query / t0.wsmsg / t0.headers... 参数
+  const params = {};
+  let j = 0;
+  $(prefix + '-rows').querySelectorAll('.tcard').forEach(row => {
+    const url = row.querySelector('.t-url').value.trim();
+    if (!url) return;
+    const proto = row.querySelector('.t-proto').value;
+    const isWs = proto === 'ws' || proto === 'wss';
+    params['t' + j + '.url'] = url;
+    params['t' + j + '.proto'] = proto;
+    params['t' + j + '.method'] = isWs ? 'GET' : row.querySelector('.t-method').value;
+    params['t' + j + '.query'] = isWs ? '' : kvQuery(row.querySelector('.t-params')); // KV -> k=v&k2=v2
+    params['t' + j + '.headers'] = kvText(row.querySelector('.t-kv'));                // KV -> "Key: Value" 行
+    params['t' + j + '.wsmsg'] = row.querySelector('.t-wsmsg') ? row.querySelector('.t-wsmsg').value : '';
+    j++;
+  });
+  return { params, count: j };
+}
+function renderWsLogs(prefix, targets) { // 将 ws 收发消息回填到对应接口卡片
+  const cards = $(prefix + '-rows').querySelectorAll('.tcard');
+  targets.forEach((t, i) => {
+    const card = cards[i];
+    if (!card || !t.messages || !t.messages.length) return;
+    const logEl = card.querySelector('.ws-log');
+    if (!logEl) return;
+    logEl.innerHTML = t.messages.map(m =>
+      `<div class="ws-msg"><span class="time">${m[1]}</span> <span class="dir-${m[0]}">${m[0] === 'S' ? '发送' : '接收'}</span> ${escAttr(m[2])}</div>`).join('');
+    logEl.scrollTop = logEl.scrollHeight;
+  });
+}
+
+// ---------- 弱网预设(选中高亮,手动修改取消高亮) ----------
+document.querySelectorAll('.preset[data-v]').forEach(b => b.onclick = () => {
+  const [lat, jit, down, up] = b.dataset.v.split(',');
+  const p = b.dataset.t;
+  $(p + '-lat').value = lat; $(p + '-jit').value = jit;
+  $(p + '-down').value = down; $(p + '-up').value = up;
+  document.querySelectorAll(`.preset[data-t="${p}"]`).forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+});
+['mon', 'load'].forEach(p => ['lat', 'jit', 'down', 'up'].forEach(f => {
+  $(p + '-' + f).addEventListener('input', () =>
+    document.querySelectorAll(`.preset[data-t="${p}"]`).forEach(x => x.classList.remove('active')));
+}));
+function netParams(p) {
+  return { netLatency: $(p + '-lat').value || 0, netJitter: $(p + '-jit').value || 0,
+           netDown: $(p + '-down').value || 0, netUp: $(p + '-up').value || 0 };
+}
+
+function exportResult(type, format) {
+  const name = (type === 'monitor' ? '采样监测结果' : '压测结果') + '.' + format;
+  fetch('/api/' + type + '/export?format=' + format)
+    .then(r => { if (!r.ok) throw new Error('导出失败: ' + r.status); return r.blob(); })
+    .then(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    })
+    .catch(e => alert(e.message));
+}
+
+// ---------- 指标中文提示(tooltip) ----------
+const METRIC = {
+  'QPS': '每秒处理的请求数,反映吞吐能力(越高越好)',
+  'P50': '中位数:50% 的请求耗时快于该值',
+  'P90': '90% 的请求耗时快于该值',
+  'P95': '95% 的请求耗时快于该值',
+  'P99': '99% 的请求耗时快于该值(长尾)',
+  'MAX': '最大耗时(最慢的一次请求)',
+  'AVG': '平均耗时'
+};
+function tip(k) { return METRIC[k] ? ` title="${METRIC[k]}"` : ''; }
+
+// ---------- 历史调用接口(去重,快速选择) ----------
+async function loadHistoryInterfaces() {
+  try {
+    const list = await (await fetch('/api/interfaces')).json();
+    window._interfaces = list || [];
+    ['smoke', 'mon', 'load'].forEach(p => {
+      const sel = $(p + '-hist');
+      if (!sel) return;
+      sel.innerHTML = '<option value="">选择历史接口...</option>' +
+        (list || []).map((e, i) => `<option value="${i}">${shortUrl(e.proto + '://' + e.url)} (${e.method})</option>`).join('');
+    });
+  } catch (e) { /* 忽略 */ }
+}
+function useHistory(prefix, sel) {
+  const idx = parseInt(sel.value, 10);
+  if (isNaN(idx)) return;
+  const e = (window._interfaces || [])[idx];
+  if (!e) return;
+  addTargetRow(prefix, { url: e.url, proto: e.proto, method: e.method }, prefix === 'smoke' ? ['http', 'https'] : undefined);
+  sel.value = '';
+}
+
+async function post(url, params) {
+  const body = Object.entries(params).map(([k,v]) => encodeURIComponent(k)+'='+encodeURIComponent(v)).join('&');
+  const res = await fetch(url, { method: 'POST', body });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// ---------- 图表(无依赖 canvas) ----------
+function ctx2d(id) {
+  const cv = $(id), dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth || 400, h = cv.clientHeight || 200;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const c = cv.getContext('2d'); c.scale(dpr, dpr);
+  return [c, w, h];
+}
+function lineChart(id, seriesArr, threshold) { // seriesArr: [{name, color, data:[{x,y}]}]
+  const [c, w, h] = ctx2d(id);
+  c.clearRect(0, 0, w, h);
+  const px = 36, pt = 10;
+  const all = seriesArr.flatMap(s => s.data);
+  if (!all.length) { c.fillStyle = '#a0aec0'; c.fillText('暂无数据', w/2-24, h/2); return; }
+  const xs = all.map(d => d.x), ys = all.map(d => d.y);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y1 = Math.max(...ys, threshold || 0) * 1.1;
+  const X = x => px + (x - x0) / Math.max(x1 - x0, 1) * (w - px - 6 - (seriesArr.length > 1 ? 120 : 0));
+  const Y = y => h - pt - y / y1 * (h - pt - 16);
+  c.strokeStyle = '#e2e8f0'; c.fillStyle = '#90a0b0'; c.font = '10px monospace';
+  for (let g = 0; g <= 4; g++) {
+    const yv = y1 * g / 4, y = Y(yv);
+    c.beginPath(); c.moveTo(px, y); c.lineTo(w - 6, y); c.stroke();
+    c.fillText(Math.round(yv), 2, y + 3);
+  }
+  if (threshold) { c.strokeStyle = '#e0533d'; c.setLineDash([4,3]); c.beginPath(); c.moveTo(px, Y(threshold)); c.lineTo(w-6, Y(threshold)); c.stroke(); c.setLineDash([]); }
+  seriesArr.forEach(s => {
+    if (!s.data.length) return;
+    c.strokeStyle = s.color; c.lineWidth = 1.5; c.beginPath();
+    s.data.forEach((d, i) => i ? c.lineTo(X(d.x), Y(d.y)) : c.moveTo(X(d.x), Y(d.y)));
+    c.stroke();
+  });
+  if (seriesArr.length > 1) {
+    c.font = '10px sans-serif';
+    seriesArr.forEach((s, i) => {
+      const ly = 14 + i * 13;
+      c.fillStyle = s.color; c.fillRect(w - 118, ly - 7, 8, 8);
+      c.fillStyle = '#5a6b7d'; c.textAlign = 'left';
+      c.fillText(s.name.slice(0, 14), w - 106, ly);
+    });
+  }
+}
+function barChart(id, labels, values, color) {
+  const [c, w, h] = ctx2d(id);
+  c.clearRect(0, 0, w, h);
+  if (!values.length) { c.fillStyle = '#a0aec0'; c.fillText('暂无数据', w/2-24, h/2); return; }
+  const max = Math.max(...values) * 1.15;
+  const bw = (w - 30) / values.length;
+  c.font = '10px sans-serif';
+  values.forEach((v, i) => {
+    const bh = v / max * (h - 46), x = 24 + i * bw;
+    c.fillStyle = color || '#3468e0';
+    c.fillRect(x + bw*0.15, h - 24 - bh, bw*0.7, bh);
+    c.fillStyle = '#5a6b7d'; c.textAlign = 'center';
+    c.fillText(labels[i], x + bw/2, h - 9);
+    c.fillText(String(v), x + bw/2, h - 28 - bh);
+  });
+}
+function mixedChart(id, series) { // series: [[sec, qps, avgMs]]
+  const [c, w, h] = ctx2d(id);
+  c.clearRect(0, 0, w, h);
+  if (!series.length) { c.fillStyle = '#a0aec0'; c.fillText('暂无数据', w/2-24, h/2); return; }
+  const maxQ = Math.max(...series.map(s => s[1]), 1) * 1.2;
+  const maxL = Math.max(...series.map(s => s[2]), 1) * 1.2;
+  const bw = (w - 40) / series.length;
+  c.font = '10px monospace';
+  series.forEach((s, i) => {
+    const bh = s[1] / maxQ * (h - 30), x = 34 + i * bw;
+    c.fillStyle = '#b8ccf5';
+    c.fillRect(x, h - 18 - bh, Math.max(bw - 0.5, 1), bh);
+  });
+  c.strokeStyle = '#e0533d'; c.lineWidth = 1.5; c.beginPath();
+  series.forEach((s, i) => {
+    const x = 34 + i * bw + bw/2, y = h - 18 - s[2] / maxL * (h - 30);
+    i ? c.lineTo(x, y) : c.moveTo(x, y);
+  });
+  c.stroke();
+  c.fillStyle = '#7f8c9b';
+  c.fillText('QPS峰值 ' + Math.round(maxQ/1.2) + ' / 延迟峰值 ' + Math.round(maxL/1.2) + 'ms', 36, 11);
+}
+
+// ---------- ① 冒烟测试(多接口) ----------
+function clearSmoke() {
+  $('smoke-result').innerHTML = '<div class="empty">配置接口后运行,查看每个接口的分阶段耗时(DNS / TCP / TLS / 首字节 / 总耗时)</div>';
+  $('smoke-status').innerHTML = '';
+}
+function renderSmokeResults(results) {
+  if (!results.length) { $('smoke-result').innerHTML = '<div class="empty">无结果</div>'; return; }
+  let html = '';
+  results.forEach(r => {
+    html += `<h3 style="font-size:13px;color:#2c3e50;margin:10px 0 6px">${shortUrl(r.proto + '://' + r.url)} <span style="color:#7f8c9b">(${r.method})</span></h3>`;
+    html += '<table><tr><th>#</th><th>状态码</th><th>DNS(ms)</th><th>TCP连接(ms)</th><th>TLS(ms)</th><th>首字节(ms)</th><th>总耗时(ms)</th><th>服务端处理*</th></tr>';
+    r.rows.forEach(row => {
+      if (row.error) {
+        html += `<tr><td>${row.seq}</td><td class="num" colspan="6" style="color:#e0533d">请求失败:${row.error}</td></tr>`;
+      } else {
+        const server = row.firstByte - row.connect;
+        html += `<tr><td>${row.seq}</td><td class="num">${row.code}</td><td class="num">${row.dns}</td><td class="num">${row.connect}</td><td class="num">${row.tls}</td><td class="num">${row.firstByte}</td><td class="num"><b>${row.total}</b></td><td class="num" style="color:${server>500?'#e0533d':'#1a9c62'}">${server >= 0 ? server : '-'}</td></tr>`;
+      }
+    });
+    html += '</table>';
+  });
+  html += '<div class="hint">* 服务端处理 = 首字节 − TCP连接,该值大说明慢在服务端,进入第②③步</div>';
+  $('smoke-result').innerHTML = html;
+}
+$('smoke-run').onclick = async () => {
+  clearSmoke();
+  const t = collectTargets('smoke');
+  if (!t.count) { alert('请至少配置一个接口(填写 URL)'); return; }
+  $('smoke-run').disabled = true;
+  $('smoke-status').innerHTML = '<span class="running">运行中...</span>';
+  try {
+    const results = await post('/api/smoke', {
+      ...t.params, count: $('smoke-count').value, token: $('smoke-token').value, rate: $('smoke-rate').value || 0
+    });
+    loadHistoryInterfaces();
+    renderSmokeResults(results);
+    $('smoke-status').innerHTML = '<span class="ok">完成</span>';
+  } catch (e) {
+    $('smoke-status').innerHTML = '<span class="err">' + e.message + '</span>';
+  } finally { $('smoke-run').disabled = false; }
+};
+$('smoke-clear').onclick = clearSmoke;
+
+// ---------- ② 采样监测 ----------
+let monTimer = null;
+function clearMonitor() {
+  clearInterval(monTimer);
+  $('mon-start').disabled = false; $('mon-stop').disabled = true;
+  $('mon-status').innerHTML = '';
+  $('mon-cards').innerHTML = '';
+  $('mon-targets').innerHTML = '<div class="empty">开始监测后,每个接口的采样数与分位数会分别统计</div>';
+  $('mon-slow').innerHTML = '<div class="empty">开始监测后,超过阈值的请求会记录在此。观察时间戳是否有周期规律。</div>';
+  $('mon-chart-title').textContent = '响应延迟走势(ms,红线为慢阈值)';
+  lineChart('mon-chart', [], null);
+}
+$('mon-start').onclick = async () => {
+  clearMonitor();
+  const t = collectTargets('mon');
+  if (!t.count) { alert('请至少配置一个接口(填写 URL)'); return; }
+  try {
+    await post('/api/monitor/start', {
+      ...t.params,
+      duration: $('mon-duration').value, interval: $('mon-interval').value, threshold: $('mon-threshold').value,
+      token: $('mon-token').value, ...netParams('mon')
+    });
+    loadHistoryInterfaces();
+    $('mon-start').disabled = true; $('mon-stop').disabled = false;
+    monTimer = setInterval(pollMonitor, 1500);
+    pollMonitor();
+  } catch (e) { alert(e.message); }
+};
+$('mon-stop').onclick = async () => {
+  await post('/api/monitor/stop', {});
+  clearInterval(monTimer);
+  $('mon-start').disabled = false; $('mon-stop').disabled = true;
+  pollMonitor();
+};
+$('mon-clear').onclick = clearMonitor;
+async function pollMonitor() {
+  const s = await (await fetch('/api/monitor/status')).json();
+  $('mon-status').innerHTML = (s.running ? '<span class="running">监测中,剩余 ' + s.remainSec + 's</span>' : '<span class="ok">已结束</span>')
+    + (s.net ? '<span class="net-tag">弱网:' + s.net + '</span>' : '');
+  if (!s.running && !s.total) return;
+  const p = s.percentiles || {};
+  $('mon-cards').innerHTML = [
+    ['接口数', s.urls || 1, ''],
+    ['采样数', s.total, ''],
+    ['慢/异常', s.slowCount, s.slowCount > 0 ? 'warn' : ''],
+    ['P50', p.p50 != null ? p.p50 + 'ms' : '-', p.p50 > 1000 ? 'warn' : ''],
+    ['P95', p.p95 != null ? p.p95 + 'ms' : '-', p.p95 > s.threshold ? 'warn' : ''],
+    ['P99', p.p99 != null ? p.p99 + 'ms' : '-', p.p99 > s.threshold ? 'warn' : ''],
+  ].map(([t, v, cls]) => `<div class="card"><div class="v ${cls}">${v}</div><div class="t"${tip(t)}>${t}</div></div>`).join('');
+  const targets = s.targets || [];
+  $('mon-targets').innerHTML = targets.length
+    ? `<table><tr><th>接口</th><th>采样</th><th>慢/异常</th><th${tip('P50')}>P50(ms)</th><th${tip('P90')}>P90(ms)</th><th${tip('P95')}>P95(ms)</th><th${tip('P99')}>P99(ms)</th><th${tip('MAX')}>MAX(ms)</th></tr>`
+      + targets.map((t, i) => {
+          const q = t.percentiles || {};
+          return `<tr><td><span style="color:${COLORS[i % COLORS.length]}">●</span> ${shortUrl(t.url)}</td><td class="num">${t.total}</td><td class="num" style="color:${t.slowCount > 0 ? '#e0533d' : 'inherit'}">${t.slowCount}</td><td class="num">${q.p50 ?? '-'}</td><td class="num">${q.p90 ?? '-'}</td><td class="num" style="color:${(q.p95 || 0) > s.threshold ? '#e0533d' : 'inherit'}">${q.p95 ?? '-'}</td><td class="num">${q.p99 ?? '-'}</td><td class="num">${q.max ?? '-'}</td></tr>`;
+        }).join('') + '</table>'
+    : '<div class="empty">暂无数据</div>';
+  renderWsLogs('mon', targets);
+  $('mon-chart-title').textContent = '响应延迟走势(ms,红线为慢阈值' + (targets.length > 1 ? ',每条线一个接口' : '') + ')';
+  lineChart('mon-chart', (s.recentByTarget || []).map((t, i) => ({
+    name: shortUrl(t[0]), color: COLORS[i % COLORS.length],
+    data: t[1].map(r => ({ x: r[0], y: r[1] }))
+  })), s.threshold);
+  const slow = s.slow || [];
+  $('mon-slow').innerHTML = slow.length
+    ? '<table><tr><th>时间</th><th>接口</th><th>耗时</th><th>状态</th></tr>' + slow.slice().reverse().map(r => `<tr><td>${r[0]}</td><td>${shortUrl(r[1])}</td><td class="num" style="color:#e0533d">${r[2]}</td><td class="num">${r[3]}</td></tr>`).join('') + '</table>'
+    : '<div class="empty">暂无慢请求</div>';
+  if (!s.running) { clearInterval(monTimer); $('mon-start').disabled = false; $('mon-stop').disabled = true; }
+}
+
+// ---------- ③ 压力测试 ----------
+let loadTimer = null, loadWasRunning = false;
+function clearLoad() {
+  clearInterval(loadTimer);
+  $('load-start').disabled = false; $('load-stop').disabled = true;
+  $('load-status').innerHTML = '';
+  $('load-cards').innerHTML = '';
+  $('load-targets').innerHTML = '<div class="empty">压测开始后,每个接口的 QPS 与分位数会分别统计</div>';
+  $('load-stages-tbl').innerHTML = '<div class="empty">压测开始后,每个阶段结束会在此汇总 QPS 与 P95/P99</div>';
+  $('load-errors').innerHTML = '';
+  mixedChart('load-chart', []);
+  barChart('load-pct', [], [], '#e0533d');
+}
+$('load-start').onclick = async () => {
+  clearLoad();
+  const t = collectTargets('load');
+  if (!t.count) { alert('请至少配置一个接口(填写 URL)'); return; }
+  try {
+    await post('/api/load/start', {
+      ...t.params,
+      stages: $('load-stages').value, token: $('load-token').value, ...netParams('load')
+    });
+    loadHistoryInterfaces();
+    $('load-start').disabled = true; $('load-stop').disabled = false;
+    loadWasRunning = true;
+    loadTimer = setInterval(pollLoad, 1500);
+    pollLoad();
+  } catch (e) { alert(e.message); }
+};
+$('load-stop').onclick = async () => {
+  await post('/api/load/stop', {});
+  $('load-start').disabled = false; $('load-stop').disabled = true;
+  setTimeout(pollLoad, 500);
+};
+$('load-clear').onclick = clearLoad;
+async function pollLoad() {
+  const s = await (await fetch('/api/load/status')).json();
+  if (!s.running && !s.finished && !s.totalReqs) return;
+  const p = s.percentiles || {};
+  $('load-status').innerHTML = (s.running
+    ? `<span class="running">阶段 ${s.stageIndex + 1}/${s.stageTotal}(并发 ${fmt(s.stageConcurrency)})已运行 ${s.elapsedSec}s</span>`
+    : '<span class="ok">已结束,记录已保存</span>')
+    + (s.net ? '<span class="net-tag">弱网:' + s.net + '</span>' : '');
+  $('load-cards').innerHTML = [
+    ['接口数', s.urls || 1, ''],
+    ['总请求', fmt(s.totalReqs), ''], ['QPS', fmt(Math.round(s.qps)), ''],
+    ['错误率', s.errorRate + '%', s.errorRate > 1 ? 'warn' : ''],
+    ['P95', p.p95 != null ? p.p95 + 'ms' : '-', p.p95 > 500 ? 'warn' : ''],
+    ['P99', p.p99 != null ? p.p99 + 'ms' : '-', p.p99 > 1000 ? 'warn' : ''],
+  ].map(([t, v, cls]) => `<div class="card"><div class="v ${cls}">${v}</div><div class="t"${tip(t)}>${t}</div></div>`).join('');
+  mixedChart('load-chart', s.series || []);
+  const ks = ['p50', 'p90', 'p95', 'p99', 'max'];
+  barChart('load-pct', ks, ks.map(k => p[k] || 0), '#e0533d');
+  const targets = s.targets || [];
+  $('load-targets').innerHTML = targets.length
+    ? `<table><tr><th>接口</th><th>方法</th><th>请求数</th><th${tip('QPS')}>QPS(近10s)</th><th>错误率</th><th${tip('P50')}>P50(ms)</th><th${tip('P95')}>P95(ms)</th><th${tip('P99')}>P99(ms)</th><th${tip('MAX')}>MAX(ms)</th></tr>`
+      + targets.map((t, i) => {
+          const q = t.percentiles || {};
+          return `<tr><td><span style="color:${COLORS[i % COLORS.length]}">●</span> ${shortUrl(t.url)}</td><td class="num">${t.method || 'GET'}</td><td class="num">${fmt(t.reqs)}</td><td class="num"><b>${fmt(Math.round(t.qps))}</b></td><td class="num" style="color:${t.errorRate > 1 ? '#e0533d' : 'inherit'}">${t.errorRate}%</td><td class="num">${q.p50 ?? '-'}</td><td class="num" style="color:${(q.p95 || 0) > 500 ? '#e0533d' : 'inherit'}">${q.p95 ?? '-'}</td><td class="num">${q.p99 ?? '-'}</td><td class="num">${q.max ?? '-'}</td></tr>`;
+        }).join('') + '</table>'
+    : '<div class="empty">暂无数据</div>';
+  renderWsLogs('load', targets);
+  const stages = s.stageResults || [];
+  $('load-stages-tbl').innerHTML = stages.length
+    ? `<table><tr><th>阶段</th><th>并发</th><th>时长(s)</th><th>请求数</th><th${tip('QPS')}>QPS</th><th>错误</th><th${tip('P50')}>P50(ms)</th><th${tip('P95')}>P95(ms)</th><th${tip('P99')}>P99(ms)</th><th${tip('MAX')}>MAX(ms)</th></tr>`
+      + stages.map(r => `<tr><td>${r.stage}</td><td class="num">${r.concurrency}</td><td class="num">${r.durationSec}</td><td class="num">${fmt(r.reqs)}</td><td class="num"><b>${fmt(Math.round(r.qps))}</b></td><td class="num" style="color:${r.errors>0?'#e0533d':'inherit'}">${r.errors}</td><td class="num">${(r.percentiles||{}).p50 ?? '-'}</td><td class="num">${(r.percentiles||{}).p95 ?? '-'}</td><td class="num">${(r.percentiles||{}).p99 ?? '-'}</td><td class="num">${(r.percentiles||{}).max ?? '-'}</td></tr>`).join('') + '</table>'
+    : '<div class="empty">第一个阶段结束后显示</div>';
+  const errs = s.errors || {}, ek = Object.keys(errs);
+  $('load-errors').innerHTML = ek.length
+    ? '<h3 style="font-size:13px;color:#7f8c9b;margin:8px 0 6px">错误分布</h3><pre class="errors">' + ek.map(k => errs[k] + 'x  ' + k).join('\n') + '</pre>'
+    : '';
+  if (!s.running) {
+    clearInterval(loadTimer);
+    $('load-start').disabled = false; $('load-stop').disabled = true;
+    if (loadWasRunning) { loadWasRunning = false; loadHistory(); } // 结束后刷新记录列表
+  }
+}
+
+// ---------- 压测记录 ----------
+async function loadHistory() {
+  try {
+    const list = await (await fetch('/api/history/list')).json();
+    const el = $('load-history');
+    if (!list.length) { el.innerHTML = '<div class="empty">暂无记录,完成一次压测后自动保存</div>'; return; }
+    el.innerHTML = '<table><tr><th>时间</th><th>接口</th><th>总请求</th><th>错误率</th><th>QPS</th><th>P95(ms)</th><th>P99(ms)</th><th>弱网</th><th>操作</th></tr>'
+      + list.slice().reverse().map(r => `<tr>
+          <td>${r.time}</td>
+          <td title="${escAttr((r.urls || []).join('\n'))}">${(r.urls || []).length}个</td>
+          <td class="num">${fmt(r.totalReqs)}</td>
+          <td class="num">${r.errorRate}%</td>
+          <td class="num">${fmt(Math.round(r.qps))}</td>
+          <td class="num">${r.p95}</td>
+          <td class="num">${r.p99}</td>
+          <td>${r.net || '-'}</td>
+          <td>
+            <button class="preset op" onclick="viewHistory('${r.id}')">查看</button>
+            <button class="preset op" onclick="reuseHistory('${r.id}')">复用配置</button>
+            <button class="preset op" style="color:#e0533d" onclick="delHistory('${r.id}')">删除</button>
+          </td>
+        </tr>`).join('') + '</table>';
+  } catch (e) {
+    $('load-history').innerHTML = '<div class="empty">记录加载失败</div>';
+  }
+}
+async function viewHistory(id) {
+  const r = await (await fetch('/api/history/get?id=' + id)).json();
+  const res = r.result || {}, p = res.percentiles || {}, stages = res.stageResults || [];
+  let html = `<div class="cards" style="margin-top:10px">
+    <div class="card"><div class="v">${fmt(res.totalReqs)}</div><div class="t">总请求</div></div>
+    <div class="card"><div class="v">${fmt(Math.round(res.qps || 0))}</div><div class="t">平均 QPS</div></div>
+    <div class="card"><div class="v">${res.errorRate}%</div><div class="t">错误率</div></div>
+    <div class="card"><div class="v">${p.p95 ?? '-'}ms</div><div class="t">P95</div></div>
+    <div class="card"><div class="v">${p.p99 ?? '-'}ms</div><div class="t">P99</div></div>
+    <div class="card"><div class="v">${res.durationSec ?? '-'}s</div><div class="t">总时长</div></div>
+  </div>`;
+  html += '<table><tr><th>阶段</th><th>并发</th><th>时长(s)</th><th>请求数</th><th>QPS</th><th>错误</th><th>P95(ms)</th><th>P99(ms)</th><th>分接口</th></tr>'
+    + stages.map(s2 => `<tr><td>${s2.stage}</td><td class="num">${s2.concurrency}</td><td class="num">${s2.durationSec}</td><td class="num">${fmt(s2.reqs)}</td><td class="num">${fmt(Math.round(s2.qps))}</td><td class="num">${s2.errors}</td><td class="num">${(s2.percentiles||{}).p95 ?? '-'}</td><td class="num">${(s2.percentiles||{}).p99 ?? '-'}</td><td class="num">${(s2.targets||[]).length}个</td></tr>`).join('') + '</table>';
+  $('load-history-detail').innerHTML = '<h3 style="font-size:13px;color:#7f8c9b;margin:10px 0 6px">记录详情:' + r.time + '(' + (r.config.targets || []).length + ' 个接口)</h3>' + html;
+  $('load-history-detail').scrollIntoView({ behavior: 'smooth' });
+}
+async function reuseHistory(id) {
+  const r = await (await fetch('/api/history/get?id=' + id)).json();
+  const cfg = r.config || {};
+  $('load-rows').innerHTML = '';
+  (cfg.targets || []).forEach(t => addTargetRow('load', t));
+  if (!(cfg.targets || []).length) addTargetRow('load');
+  if (cfg.stages) $('load-stages').value = cfg.stages.map(s => s[0] + ' ' + s[1]).join(',');
+  if (cfg.net) {
+    $('load-lat').value = cfg.net[0]; $('load-jit').value = cfg.net[1];
+    $('load-down').value = cfg.net[2]; $('load-up').value = cfg.net[3];
+  }
+  if (cfg.token != null) $('load-token').value = cfg.token;
+  document.querySelectorAll('.preset[data-t="load"]').forEach(x => x.classList.remove('active'));
+  alert('已载入压测配置(' + r.time + '),可修改后重新压测');
+}
+async function delHistory(id) {
+  if (!confirm('确认删除该压测记录?')) return;
+  await post('/api/history/delete', { id });
+  $('load-history-detail').innerHTML = '';
+  loadHistory();
+}
+
+// ---------- 初始化 ----------
+addTargetRow('smoke', {}, ['http', 'https']);
+addTargetRow('mon');
+addTargetRow('load');
+loadHistory();
+loadHistoryInterfaces();
+</script>
+</body>
+</html>
