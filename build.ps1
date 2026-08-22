@@ -45,20 +45,22 @@ if (-not (Test-Path assets\app.ico)) { java IconGen.java }
 
 # 5) jpackage 生成 exe
 Write-Host "==> 5/5 jpackage 生成 exe"
-jpackage `
-  --type exe `
-  --name "$APP_NAME" `
-  --app-version $VERSION `
-  --input dist `
-  --main-jar perf-test.jar `
-  --main-class $MAIN_CLASS `
-  --icon assets\app.ico `
-  --vendor "一叶知秋" `
-  --dest . `
-  --win-shortcut `
-  --win-menu `
-  --java-options "-Dfile.encoding=UTF-8" `
-  --java-options '-Djava.library.path=$APPDIR'
+$jpackageArgs = @(
+  '--type', 'exe',
+  '--name', $APP_NAME,
+  '--app-version', $VERSION,
+  '--input', 'dist',
+  '--main-jar', 'perf-test.jar',
+  '--main-class', $MAIN_CLASS,
+  '--icon', 'assets\app.ico',
+  '--vendor', '一叶知秋',
+  '--dest', '.',
+  '--win-shortcut',
+  '--win-menu',
+  '--java-options', '-Dfile.encoding=UTF-8',
+  '--java-options', '-Djava.library.path=$APPDIR'
+)
+& jpackage @jpackageArgs
 if ($LASTEXITCODE -ne 0) { Write-Host "打包失败"; exit 1 }
 
 Write-Host "==> 完成: ${APP_NAME}-${VERSION}.exe"
