@@ -4,8 +4,12 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
+# 设置 UTF-8 代码页,避免中文/特殊字符在原生进程传参时乱码
+chcp 65001 | Out-Null
+
 $VERSION = "1.0.0"
-$APP_NAME = "压测"
+# Windows 下 jpackage 对非 ASCII 应用名支持不佳,用 ASCII 名(窗口标题仍为"压测")
+$APP_NAME = "PerfTest"
 $MAIN_CLASS = "Launcher"
 $JAVAFX_VER = "21.0.4"
 $JAVAFX_DIR = "javafx-sdk-$JAVAFX_VER"
@@ -53,13 +57,13 @@ $jpackageArgs = @(
   '--main-jar', 'perf-test.jar',
   '--main-class', $MAIN_CLASS,
   '--icon', 'assets\app.ico',
-  '--vendor', '一叶知秋',
   '--dest', '.',
   '--win-shortcut',
   '--win-menu',
   '--java-options', '-Dfile.encoding=UTF-8',
   '--java-options', '-Djava.library.path=$APPDIR'
 )
+Write-Host ("jpackage args: " + ($jpackageArgs -join ' '))
 & jpackage @jpackageArgs
 if ($LASTEXITCODE -ne 0) { Write-Host "打包失败"; exit 1 }
 
